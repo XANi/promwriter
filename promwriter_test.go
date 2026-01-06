@@ -1,6 +1,8 @@
 package promwriter
 
 import (
+	"github.com/XANi/goneric"
+	"github.com/stretchr/testify/assert"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +16,6 @@ import (
 )
 
 func TestPromWriterSendsRemoteWrite(t *testing.T) {
-	// Channel to receive the parsed WriteRequest from the HTTP handler
 	recv := make(chan *prompb.WriteRequest, 1)
 
 	// Start a test HTTP server to receive remote-write requests
@@ -50,33 +51,34 @@ func TestPromWriterSendsRemoteWrite(t *testing.T) {
 			return
 		}
 
-		// Unmarshal to prompb.WriteRequest. Use github.com/golang/protobuf/proto to be compatible.
 		var wr prompb.WriteRequest
 		if err := gproto.Unmarshal(dec, &wr); err != nil {
 			t.Fatalf("proto unmarshal error: %v", err)
 			return
 		}
 
-		// send parsed request back to test goroutine
 		select {
 		case recv <- &wr:
 		default:
 		}
 
-		// respond with success code expected by the writer
 		w.WriteHeader(204)
 	}))
 	defer srv.Close()
 
-	// Create logger
 	logger := zap.NewExample().Sugar()
 
-	// Create PromWriter pointing at the test server
+	// test defaults
+	_, err := New(Config{
+		InstanceName: srv.URL,
+		Logger:       logger,
+	})
+	assert.NoError(t, err)
+
 	cfg := Config{
 		URL:              srv.URL,
-		Timeout:          time.Second * 5,
-		MaxBatchDuration: time.Millisecond * 200,
-		MaxBatchLength:   100,
+		MaxBatchDuration: time.Millisecond * 1,
+		MaxBatchLength:   1,
 		Logger:           logger,
 	}
 	pw, err := New(cfg)
@@ -94,12 +96,13 @@ func TestPromWriterSendsRemoteWrite(t *testing.T) {
 		TS:      now,
 	}
 
-	// Send the metric
 	if err := pw.WriteMetric(ev); err != nil {
 		t.Fatalf("WriteMetric returned error: %v", err)
 	}
 
-	// Wait for the server to receive a request
+	// add the __name__ to labels for tests to match
+	ev.Labels["__name__"] = "test_metric_total"
+
 	select {
 	case got := <-recv:
 		// basic assertions: one timeseries with one sample
@@ -107,28 +110,18 @@ func TestPromWriterSendsRemoteWrite(t *testing.T) {
 			t.Fatalf("expected 1 timeseries, got %d", len(got.Timeseries))
 		}
 		ts := got.Timeseries[0]
-		// check __name__ label exists and matches (server receives the name)
-		foundName := ""
-		for _, l := range ts.Labels {
-			if l.Name == "__name__" {
-				foundName = l.Value
-			}
-		}
-		if foundName == "" {
-			t.Fatalf("__name__ label not present")
-		}
-		// value and timestamp checks
-		if len(ts.Samples) != 1 {
-			t.Fatalf("expected 1 sample, got %d", len(ts.Samples))
-		}
-		s := ts.Samples[0]
-		if s.Value != ev.Value {
-			t.Fatalf("sample value mismatch: want %v got %v", ev.Value, s.Value)
-		}
-		if s.Timestamp != ev.TS.UnixMilli() {
-			t.Fatalf("timestamp mismatch: want %d got %d", ev.TS.UnixMilli(), s.Timestamp)
-		}
+		assert.Len(t, got.Timeseries, 1)
 
+		labelMap := goneric.SliceMapFunc(func(t prompb.Label) (string, string) {
+			return t.Name, t.Value
+		}, ts.Labels)
+		assert.Equal(t, ev.Labels, labelMap)
+
+		assert.Len(t, ts.Samples, 1)
+		s := ts.Samples[0]
+		assert.Equal(t, ev.Value, s.Value)
+		assert.Equal(t, ev.TS.UnixMilli(), s.Timestamp)
+	// Wait for the server to receive a request
 	case <-time.After(time.Second * 2):
 		t.Fatalf("timed out waiting for remote write")
 	}
