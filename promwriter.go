@@ -45,7 +45,7 @@ type PrometheusWrite struct {
 func (p *PrometheusWrite) Write(f io.Writer) (n int, err error) {
 	buf := bytes.Buffer{}
 	if p.Counter {
-		buf.WriteString(promquotelabel("total_" + p.Name))
+		buf.WriteString(promquotelabel(p.Name + "_total"))
 	} else {
 		buf.WriteString(promquotelabel(p.Name))
 	}
@@ -112,9 +112,9 @@ func (p *PromWriter) WriteChannel() chan PrometheusWrite {
 	return p.writeChannel
 }
 
-func (p *PromWriter) WriteMetric(m *PrometheusWrite) error {
+func (p *PromWriter) WriteMetric(m PrometheusWrite) error {
 	select {
-	case p.writeChannel <- *m:
+	case p.writeChannel <- m:
 		return nil
 	}
 
@@ -200,6 +200,9 @@ func (p *PromWriter) writer() {
 			}
 
 			for _, e := range events {
+				if e.Counter {
+					e.Name = e.Name + "_total"
+				}
 				dp := prompb.TimeSeries{
 					Labels: []prompb.Label{{
 						Name:  "__name__",

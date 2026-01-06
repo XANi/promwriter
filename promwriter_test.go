@@ -1,8 +1,10 @@
 package promwriter
 
 import (
+	"bytes"
 	"github.com/XANi/goneric"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -88,8 +90,8 @@ func TestPromWriterSendsRemoteWrite(t *testing.T) {
 
 	// Create a sample metric
 	now := time.Now().Truncate(time.Millisecond) // keep milliseconds deterministic
-	ev := &PrometheusWrite{
-		Name:    "test_metric_total",
+	ev := PrometheusWrite{
+		Name:    "test_metric",
 		Labels:  map[string]string{"host": "unit-test", "zone": "us-east-1"},
 		Value:   42.5,
 		Counter: true, // exercise counter path (label/name handling isn't used server-side here)
@@ -99,9 +101,10 @@ func TestPromWriterSendsRemoteWrite(t *testing.T) {
 	if err := pw.WriteMetric(ev); err != nil {
 		t.Fatalf("WriteMetric returned error: %v", err)
 	}
-
-	// add the __name__ to labels for tests to match
-	ev.Labels["__name__"] = "test_metric_total"
+	var b bytes.Buffer
+	_, err = ev.Write(&b)
+	require.NoError(t, err)
+	assert.Contains(t, b.String(), `test_metric_total{host="unit-test",zone="us-east-1"} 42.500000`)
 
 	select {
 	case got := <-recv:
@@ -115,6 +118,8 @@ func TestPromWriterSendsRemoteWrite(t *testing.T) {
 		labelMap := goneric.SliceMapFunc(func(t prompb.Label) (string, string) {
 			return t.Name, t.Value
 		}, ts.Labels)
+		// add the __name__ to labels for tests to match
+		ev.Labels["__name__"] = "test_metric_total"
 		assert.Equal(t, ev.Labels, labelMap)
 
 		assert.Len(t, ts.Samples, 1)
