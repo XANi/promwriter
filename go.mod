@@ -1,6 +1,6 @@
 module github.com/XANi/promwriter
 
-go 1.25.5
+go 1.25
 
 require (
 	github.com/XANi/goneric v1.3.0 // indirect

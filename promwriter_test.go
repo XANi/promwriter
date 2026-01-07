@@ -90,7 +90,7 @@ func TestPromWriterSendsRemoteWrite(t *testing.T) {
 
 	// Create a sample metric
 	now := time.Now().Truncate(time.Millisecond) // keep milliseconds deterministic
-	ev := PrometheusWrite{
+	ev := Metric{
 		Name:    "test_metric",
 		Labels:  map[string]string{"host": "unit-test", "zone": "us-east-1"},
 		Value:   42.5,
